@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+data:
+  LOG_LEVEL: "INFO"
+  CACHE_TTL: "300"
+  REDIS_URL: "redis://redis:6379/0"
+  USER_SERVICE_URL: "http://user-service:8001"
+  DATA_SERVICE_URL: "http://data-service:8002"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4318"
+---
+# Demo values only. In a real cluster this comes from an external secret manager
+# (External Secrets Operator / Vault / SOPS) — never committed in plain text.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: platform-secrets
+type: Opaque
+stringData:
+  POSTGRES_USER: platform
+  POSTGRES_PASSWORD: changeme
+  POSTGRES_DB: platform
+  DATABASE_URL: postgresql+asyncpg://platform:changeme@postgres:5432/platform
+  JWT_SECRET: change-this-in-production

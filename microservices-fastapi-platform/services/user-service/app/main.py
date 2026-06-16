@@ -18,11 +18,13 @@ from .crud import (
 from .database import get_session
 from .logging_config import configure_logging
 from .schemas import TokenRequest, TokenResponse, UserCreate, UserOut, UserUpdate
+from .tracing import setup_tracing
 
 configure_logging(settings.log_level)
 logger = structlog.get_logger(__name__)
 
 app = FastAPI(title="User Service", version="1.0.0")
+setup_tracing(app, "user-service")
 
 REQUEST_COUNT = Counter(
     "user_requests_total", "Total requests", ["method", "path", "status"]

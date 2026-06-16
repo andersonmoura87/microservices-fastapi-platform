@@ -8,6 +8,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 
 from .config import settings
 from .logging_config import configure_logging
+from .tracing import setup_tracing
 
 configure_logging(settings.log_level)
 logger = structlog.get_logger(__name__)
@@ -17,6 +18,7 @@ app = FastAPI(
     description="Unified entry point for the microservices platform",
     version="1.0.0",
 )
+setup_tracing(app, "api-gateway")
 
 app.add_middleware(
     CORSMiddleware,

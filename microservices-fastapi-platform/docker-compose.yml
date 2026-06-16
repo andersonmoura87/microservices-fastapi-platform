@@ -40,6 +40,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-changeme}@postgres/${POSTGRES_DB:-platform}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-prod}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4318}
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,6 +70,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CACHE_TTL: ${CACHE_TTL:-300}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4318}
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,6 +103,7 @@ services:
       USER_SERVICE_URL: http://user-service:8001
       DATA_SERVICE_URL: http://data-service:8002
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4318}
     depends_on:
       user-service:
         condition: service_healthy
@@ -136,6 +139,39 @@ services:
     networks:
       - platform
 
+  tempo:
+    image: grafana/tempo:2.5.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./infra/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    networks:
+      - platform
+
+  loki:
+    image: grafana/loki:3.0.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./infra/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - platform
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    volumes:
+      - ./infra/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - platform
+
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
@@ -150,12 +186,16 @@ services:
       - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
     depends_on:
       - prometheus
+      - tempo
+      - loki
     networks:
       - platform
 
 volumes:
   postgres_data:
   grafana_data:
+  tempo_data:
+  loki_data:
 
 networks:
   platform:

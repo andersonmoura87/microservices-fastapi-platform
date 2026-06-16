@@ -11,11 +11,13 @@ from .config import settings
 from .database import get_session
 from .logging_config import configure_logging
 from .schemas import RecordCreate, RecordOut
+from .tracing import setup_tracing
 
 configure_logging(settings.log_level)
 logger = structlog.get_logger(__name__)
 
 app = FastAPI(title="Data Service", version="1.0.0")
+setup_tracing(app, "data-service")
 
 REQUEST_COUNT = Counter(
     "data_requests_total", "Total requests", ["method", "path", "status"]
