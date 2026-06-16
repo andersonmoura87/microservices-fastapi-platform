@@ -1,0 +1,74 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "title": "Request rate per service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(gateway_requests_total[5m]))", "legendFormat": "api-gateway", "refId": "A" },
+        { "expr": "sum(rate(user_requests_total[5m]))", "legendFormat": "user-service", "refId": "B" },
+        { "expr": "sum(rate(data_requests_total[5m]))", "legendFormat": "data-service", "refId": "C" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "title": "P95 latency per service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "api-gateway", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(user_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "user-service", "refId": "B" },
+        { "expr": "histogram_quantile(0.95, sum(rate(data_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "data-service", "refId": "C" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "title": "Cache hit ratio (data-service)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(data_cache_hits_total[5m])) / clamp_min(sum(rate(data_cache_hits_total[5m])) + sum(rate(data_cache_misses_total[5m])), 1)",
+          "legendFormat": "hit ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "title": "5xx responses per service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(gateway_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "api-gateway", "refId": "A" },
+        { "expr": "sum(rate(user_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "user-service", "refId": "B" },
+        { "expr": "sum(rate(data_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "data-service", "refId": "C" }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["platform"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "",
+  "title": "Microservices Platform Overview",
+  "uid": "platform-overview",
+  "version": 1
+}
