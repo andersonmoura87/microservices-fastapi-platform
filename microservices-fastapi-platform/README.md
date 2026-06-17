@@ -107,10 +107,13 @@ sequenceDiagram
 | Containers | Docker + Docker Compose |
 | Orquestração | Kubernetes (Kustomize: base + overlays dev/prod) |
 | Métricas | Prometheus (`/metrics` em cada serviço) |
+| Alertas | Prometheus rules + Alertmanager (SLOs) |
 | Tracing | OpenTelemetry → Tempo |
 | Logs | structlog (JSON) → Loki via Promtail |
 | Dashboards | Grafana (datasources provisionados) |
-| CI/CD | GitHub Actions + Trivy + Dependabot |
+| GitOps | ArgoCD (overlays dev/prod) |
+| CI/CD | GitHub Actions + Trivy + cosign + SBOM + Dependabot |
+| Carga | k6 (thresholds de SLO) |
 
 ## Início Rápido
 
@@ -124,10 +127,11 @@ docker compose up --build
 
 Os serviços ficarão disponíveis em:
 
-- API Gateway → http://localhost:8000
-- Swagger UI  → http://localhost:8000/docs
-- Prometheus  → http://localhost:9090
-- Grafana     → http://localhost:3000 (admin / admin)
+- API Gateway   → http://localhost:8000
+- Swagger UI    → http://localhost:8000/docs
+- Prometheus    → http://localhost:9090
+- Alertmanager  → http://localhost:9093
+- Grafana       → http://localhost:3000 (admin / admin)
 
 ## Endpoints da API
 
@@ -167,7 +171,8 @@ microservices-fastapi-platform/
 │   │   │   ├── main.py
 │   │   │   ├── config.py
 │   │   │   ├── logging_config.py
-│   │   │   └── tracing.py
+│   │   │   ├── tracing.py
+│   │   │   └── ratelimit.py
 │   │   ├── tests/
 │   │   ├── Dockerfile
 │   │   ├── .dockerignore
@@ -212,7 +217,10 @@ microservices-fastapi-platform/
 │   ├── postgres/
 │   │   └── init.sql
 │   ├── prometheus/
-│   │   └── prometheus.yml
+│   │   ├── prometheus.yml
+│   │   └── rules/slo.yml
+│   ├── alertmanager/
+│   │   └── alertmanager.yml
 │   ├── tempo/
 │   │   └── tempo.yaml
 │   ├── loki/
@@ -223,11 +231,17 @@ microservices-fastapi-platform/
 │       ├── datasources/
 │       └── dashboards/
 ├── deploy/
-│   └── k8s/
-│       ├── base/
-│       └── overlays/
-│           ├── dev/
-│           └── prod/
+│   ├── k8s/
+│   │   ├── base/
+│   │   └── overlays/
+│   │       ├── dev/
+│   │       └── prod/
+│   └── argocd/
+│       ├── project.yaml
+│       ├── application-dev.yaml
+│       └── application-prod.yaml
+├── load/
+│   └── k6-smoke.js
 ├── .github/
 │   ├── workflows/
 │   │   └── ci.yml
@@ -235,6 +249,8 @@ microservices-fastapi-platform/
 ├── docker-compose.yml
 ├── Makefile
 ├── ruff.toml
+├── .pre-commit-config.yaml
+├── .secrets.baseline
 ├── .env.example
 └── README.md
 ```
@@ -243,18 +259,22 @@ microservices-fastapi-platform/
 
 ```mermaid
 flowchart LR
-    push(["push na main / PR"]) --> lint["Lint<br/>(ruff)"]
+    push(["push na main / PR"]) --> lint["Lint<br/>ruff + hadolint"]
     lint --> test["Test (matrix 3 serviços)<br/>Postgres + Redis · alembic · pytest"]
     test --> build["Build Images<br/>(3 serviços)"]
     build --> scan["Scan Trivy<br/>HIGH/CRITICAL → falha"]
-    scan --> push_ghcr["Push GHCR<br/>(só na main)"]
+    scan --> pushimg["Push GHCR<br/>(só na main)"]
+    pushimg --> sign["Cosign sign<br/>(keyless / OIDC)"]
+    sign --> sbom["SBOM (syft)<br/>+ attest"]
 ```
 
-O pipeline roda a cada push para a `main` e em todos os pull requests. O job de testes
-roda em **matrix** pelos três serviços, sobe Postgres + Redis como serviços do GitHub Actions
-e aplica as migrations (`alembic upgrade head`) antes do `pytest`. O `build` só publica a imagem
-no GHCR se o scan de vulnerabilidades do Trivy passar (falha em HIGH/CRITICAL com fix disponível).
-O `dependabot` mantém as dependências pip, as imagens Docker e as GitHub Actions atualizadas.
+O pipeline roda a cada push para a `main` e em todos os pull requests. `ruff` e `hadolint`
+(lint de Dockerfile) rodam em paralelo; o job de testes roda em **matrix** pelos três serviços,
+sobe Postgres + Redis como serviços do GitHub Actions e aplica as migrations
+(`alembic upgrade head`) antes do `pytest`. O `build` só publica no GHCR se o scan do Trivy
+passar (falha em HIGH/CRITICAL com fix disponível). Após o push, cada imagem é **assinada com
+cosign** (keyless via OIDC) e tem seu **SBOM gerado (syft) e anexado como attestation**.
+O `dependabot` mantém pip, imagens Docker e GitHub Actions atualizados.
 
 ## Observabilidade
 
@@ -278,6 +298,20 @@ aparece como um único trace ponta-a-ponta. O exporter usa OTLP/HTTP e só liga 
 os logs dos containers e envia ao Loki. Cada log carrega `trace_id`/`span_id`, e o Grafana está
 configurado para **pivotar de um log direto para o trace correspondente** no Tempo (e vice-versa).
 
+**Alertas e SLOs (Prometheus + Alertmanager).** As regras em `infra/prometheus/rules/slo.yml`
+definem os SLIs como *recording rules* e disparam alertas para o Alertmanager:
+
+| Alerta | Condição | Severidade |
+|---|---|---|
+| `ServiceDown` | `up == 0` por 2m | critical |
+| `HighErrorRate` | 5xx > 5% por 5m | critical |
+| `ErrorBudgetBurn` | 5xx > 1% por 15m | warning |
+| `HighLatencyP95` | p95 > 300ms por 10m | warning |
+
+O Alertmanager agrupa, faz inhibition (um `critical` silencia o `warning` equivalente) e
+encaminha para o receiver configurado (Slack/PagerDuty/webhook — deixei um webhook placeholder
+para subir sem credenciais).
+
 ## Variáveis de Ambiente
 
 Copie `.env.example` para `.env` e ajuste conforme necessário:
@@ -291,6 +325,8 @@ CACHE_TTL=300
 JWT_SECRET=change-this-in-production
 LOG_LEVEL=INFO
 OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=60
 ```
 
 ## Migrations
@@ -330,7 +366,44 @@ make logs      # tail dos logs
 make lint      # ruff em todos os serviços
 make test      # roda os testes de todos os serviços
 make migrate   # aplica as migrations nos containers
+make load      # roda o teste de carga k6 contra o gateway
+make hooks     # instala os pre-commit hooks
 make clean     # derruba a stack e remove os volumes
+```
+
+## Rate limiting & graceful shutdown
+
+O gateway aplica **rate limiting por IP** com um contador de janela fixa no **Redis** — o estado
+fica no Redis (não na memória do processo) justamente para o limite ser consistente entre os
+múltiplos workers/réplicas. O limiter **falha aberto**: se o Redis cair, as requisições passam,
+para não transformar uma indisponibilidade de cache em indisponibilidade da API. Ao exceder,
+responde `429` com `Retry-After`. Configurável via `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW`.
+
+No **shutdown**, o `lifespan` fecha o cliente httpx (pool) e a conexão Redis de forma limpa.
+No Kubernetes, o gateway tem `terminationGracePeriodSeconds: 30` e um hook `preStop` para
+**drenar conexões em andamento** antes do `SIGTERM`.
+
+## Teste de carga (k6)
+
+`load/k6-smoke.js` exercita o caminho de escrita (`/data/ingest`) e leitura (`/data/records`)
+através do gateway. Os **thresholds codificam os SLOs** (p95 < 300ms, erro < 1%), então o k6 sai
+com código de erro se forem violados — pronto para virar gate em CI.
+
+```bash
+make up                          # com a stack no ar
+make load                        # k6 run load/k6-smoke.js
+k6 run -e BASE_URL=http://host load/k6-smoke.js   # apontando para outro alvo
+```
+
+## GitOps (ArgoCD)
+
+`deploy/argocd/` traz um `AppProject` e duas `Application` apontando para os overlays do Git
+(a fonte da verdade). O ambiente **dev** sincroniza automaticamente (`prune` + `selfHeal`);
+**prod** é sync manual (promoção feita por uma pessoa).
+
+```bash
+kubectl apply -f deploy/argocd/project.yaml
+kubectl apply -f deploy/argocd/application-dev.yaml
 ```
 
 ## Kubernetes
@@ -367,6 +440,8 @@ kubectl apply -k deploy/k8s/overlays/prod
 - Containers rodam como usuário **não-root** (`appuser`), com build **multi-stage** para imagem enxuta
 - No Kubernetes: `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, `drop: [ALL]` e seccomp `RuntimeDefault`
 - Imagens são escaneadas com **Trivy** no CI; HIGH/CRITICAL com fix disponível **quebram o build**
+- **Supply chain:** imagens **assinadas com cosign** (keyless/OIDC) + **SBOM (syft)** anexado como attestation
+- **`hadolint`** lint dos Dockerfiles no CI; **`pre-commit`** com ruff, `detect-secrets`, hadolint e checagens de YAML
 - Segredos só via variáveis de ambiente / `pydantic-settings` — nunca hardcoded
 - **Dependabot** abre PRs semanais para pip, Docker e GitHub Actions
 - Logs **estruturados em JSON** com `structlog`, correlacionados a traces via `trace_id`

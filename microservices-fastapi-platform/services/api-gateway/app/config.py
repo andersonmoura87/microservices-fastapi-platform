@@ -9,5 +9,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     upstream_timeout: float = 10.0
 
+    redis_url: str = "redis://redis:6379/0"
+    rate_limit_enabled: bool = True
+    rate_limit_requests: int = 100
+    rate_limit_window: int = 60
+
 
 settings = Settings()

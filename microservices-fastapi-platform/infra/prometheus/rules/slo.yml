@@ -1,0 +1,56 @@
+groups:
+  - name: slo-recording
+    interval: 30s
+    rules:
+      # SLI: error ratio (5xx) at the gateway over the last 5 minutes.
+      - record: gateway:request_error_ratio:rate5m
+        expr: |
+          sum(rate(gateway_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(gateway_requests_total[5m])), 1)
+
+      # SLI: p95 latency at the gateway over the last 5 minutes.
+      - record: gateway:request_latency_p95:5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le)
+          )
+
+  - name: slo-alerts
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} ({{ $labels.instance }}) has been unreachable for 2m."
+
+      - alert: HighErrorRate
+        expr: gateway:request_error_ratio:rate5m > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate above SLO at the gateway"
+          description: "5xx ratio is {{ $value | humanizePercentage }} (SLO: < 1%) for 5m."
+
+      - alert: ErrorBudgetBurn
+        expr: gateway:request_error_ratio:rate5m > 0.01
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Burning error budget at the gateway"
+          description: "5xx ratio is {{ $value | humanizePercentage }} (SLO: < 1%) for 15m."
+
+      - alert: HighLatencyP95
+        expr: gateway:request_latency_p95:5m > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above SLO"
+          description: "Gateway p95 is {{ $value | humanizeDuration }} (SLO: < 300ms) for 10m."

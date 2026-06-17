@@ -37,6 +37,8 @@ spec:
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
+      # Give in-flight requests time to drain on rollout/scale-down.
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -53,6 +55,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: platform-config
+          lifecycle:
+            preStop:
+              # Stop receiving new traffic, then let open connections finish
+              # before uvicorn gets SIGTERM.
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           readinessProbe:
             httpGet:
               path: /health

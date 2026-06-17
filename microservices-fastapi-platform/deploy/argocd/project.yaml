@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Microservices FastAPI Platform
+  sourceRepos:
+    - https://github.com/andersonmoura87/microservices-fastapi-platform.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: platform-dev
+    - server: https://kubernetes.default.svc
+      namespace: platform-prod
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

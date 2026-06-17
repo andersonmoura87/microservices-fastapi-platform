@@ -22,6 +22,18 @@ jobs:
       - run: pip install ruff
       - run: ruff check services/
 
+  hadolint:
+    name: Lint Dockerfiles
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, user-service, data-service]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/${{ matrix.service }}/Dockerfile
+
   test:
     name: Test (${{ matrix.service }})
     runs-on: ubuntu-latest
@@ -73,13 +85,14 @@ jobs:
         run: pytest tests/ -v
 
   build:
-    name: Build & Push Images
+    name: Build, Scan, Sign & Push
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, hadolint]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
+      id-token: write # keyless signing with cosign via OIDC
     strategy:
       matrix:
         service: [api-gateway, user-service, data-service]
@@ -117,6 +130,7 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
       - name: Push image
+        id: push
         uses: docker/build-push-action@v5
         with:
           context: ./services/${{ matrix.service }}
@@ -125,3 +139,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.5.0
+      - name: Sign image (keyless)
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.service }}.spdx.json
+      - name: Attest SBOM
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign attest --yes --predicate sbom-${{ matrix.service }}.spdx.json --type spdxjson "${IMAGE}@${DIGEST}"

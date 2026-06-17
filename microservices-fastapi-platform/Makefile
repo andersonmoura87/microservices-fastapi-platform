@@ -2,7 +2,7 @@
 COMPOSE := docker compose
 SERVICES := api-gateway user-service data-service
 
-.PHONY: help up down build logs ps lint test fmt migrate clean
+.PHONY: help up down build logs ps lint test fmt migrate clean load hooks
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -39,6 +39,12 @@ test: ## Run the test suite for every service
 migrate: ## Apply DB migrations inside the running containers
 	$(COMPOSE) exec user-service alembic upgrade head
 	$(COMPOSE) exec data-service alembic upgrade head
+
+load: ## Run the k6 load test against the gateway (needs the stack up)
+	k6 run load/k6-smoke.js
+
+hooks: ## Install the pre-commit hooks locally
+	pre-commit install
 
 clean: ## Stop the stack and drop volumes
 	$(COMPOSE) down -v

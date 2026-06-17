@@ -1,0 +1,25 @@
+route:
+  receiver: default
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: default
+      continue: true
+
+receivers:
+  - name: default
+    # Wire a real integration here (Slack, PagerDuty, webhook). Left empty so the
+    # stack runs out of the box without leaking credentials.
+    webhook_configs:
+      - url: "http://localhost:5001/"
+        send_resolved: true
+
+inhibit_rules:
+  # A critical alert silences the warning-level version of the same incident.
+  - source_matchers: [severity = "critical"]
+    target_matchers: [severity = "warning"]
+    equal: ["alertname"]
