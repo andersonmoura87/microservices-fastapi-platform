@@ -106,11 +106,12 @@ sequenceDiagram
 | Cache | Redis 7 |
 | Containers | Docker + Docker Compose |
 | Orquestração | Kubernetes (Kustomize: base + overlays dev/prod) |
+| IaC | Terraform (AWS: VPC + EKS + RDS + ElastiCache) |
 | Métricas | Prometheus (`/metrics` em cada serviço) |
 | Alertas | Prometheus rules + Alertmanager (SLOs) |
 | Tracing | OpenTelemetry → Tempo |
 | Logs | structlog (JSON) → Loki via Promtail |
-| Dashboards | Grafana (datasources provisionados) |
+| Dashboards | Grafana (overview + SLO/error budget) |
 | GitOps | ArgoCD (overlays dev/prod) |
 | CI/CD | GitHub Actions + Trivy + cosign + SBOM + Dependabot |
 | Carga | k6 (thresholds de SLO) |
@@ -227,9 +228,14 @@ microservices-fastapi-platform/
 │   │   └── loki-config.yaml
 │   ├── promtail/
 │   │   └── promtail-config.yaml
-│   └── grafana/
-│       ├── datasources/
-│       └── dashboards/
+│   ├── grafana/
+│   │   ├── datasources/
+│   │   └── dashboards/
+│   └── terraform/
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── versions.tf
 ├── deploy/
 │   ├── k8s/
 │   │   ├── base/
@@ -311,6 +317,10 @@ definem os SLIs como *recording rules* e disparam alertas para o Alertmanager:
 O Alertmanager agrupa, faz inhibition (um `critical` silencia o `warning` equivalente) e
 encaminha para o receiver configurado (Slack/PagerDuty/webhook — deixei um webhook placeholder
 para subir sem credenciais).
+
+**Dashboards.** Dois dashboards são provisionados: um *overview* (taxa, latência, cache, 5xx) e
+um de **SLO/error budget** (`slo.json`) com disponibilidade, p95 vs alvo, **burn rate
+multi-janela** (5m/1h) e consumo do error budget.
 
 ## Variáveis de Ambiente
 
@@ -405,6 +415,28 @@ k6 run -e BASE_URL=http://host load/k6-smoke.js   # apontando para outro alvo
 kubectl apply -f deploy/argocd/project.yaml
 kubectl apply -f deploy/argocd/application-dev.yaml
 ```
+
+## Infraestrutura (Terraform)
+
+`infra/terraform/` provisiona a infra de nuvem na AWS como código:
+
+- **VPC** com subnets públicas/privadas em 3 AZs + NAT gateway
+- **EKS** (control plane + managed node group com autoscaling)
+- **RDS PostgreSQL** criptografado (Multi-AZ em prod)
+- **ElastiCache Redis** (replication group, criptografia at-rest/in-transit)
+
+O comportamento muda por ambiente via a variável `environment` (em `prod` liga Multi-AZ,
+failover, deletion protection e backups longos). State remoto (S3 + DynamoDB lock) já vem
+esboçado em `versions.tf`.
+
+```bash
+cd infra/terraform
+export TF_VAR_db_password="$(openssl rand -base64 24)"
+terraform init && terraform plan && terraform apply
+$(terraform output -raw configure_kubectl)   # configura o kubectl no novo cluster
+```
+
+Detalhes em [`infra/terraform/README.md`](infra/terraform/README.md).
 
 ## Kubernetes
 

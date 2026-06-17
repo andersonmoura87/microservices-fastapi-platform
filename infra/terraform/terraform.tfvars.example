@@ -1,0 +1,14 @@
+region             = "us-east-1"
+environment        = "dev"
+kubernetes_version = "1.30"
+
+node_instance_types = ["t3.medium"]
+node_desired_size   = 2
+node_min_size       = 2
+node_max_size       = 5
+
+postgres_instance_class = "db.t3.micro"
+redis_node_type         = "cache.t3.micro"
+
+# Do NOT commit the real password. Prefer: export TF_VAR_db_password=...
+# db_password = "change-me"

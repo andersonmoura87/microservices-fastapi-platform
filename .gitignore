@@ -11,3 +11,15 @@ dist/
 grafana_data/
 postgres_data/
 loki_data/
+
+# Internal spec — keep local, never publish
+SPEC.md
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+crash.log
