@@ -57,6 +57,8 @@ async def run_migrations_online() -> None:
     )
     async with connectable.connect() as connection:
         await connection.run_sync(_do_run_migrations)
+        # asyncpg does not auto-commit on block exit; persist the DDL explicitly.
+        await connection.commit()
     await connectable.dispose()
 
 
