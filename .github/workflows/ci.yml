@@ -113,7 +113,7 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Build image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./services/${{ matrix.service }}
           load: true
@@ -131,7 +131,7 @@ jobs:
           severity: HIGH,CRITICAL
       - name: Push image
         id: push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./services/${{ matrix.service }}
           push: true
